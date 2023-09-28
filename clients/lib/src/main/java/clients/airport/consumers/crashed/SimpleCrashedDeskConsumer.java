@@ -42,13 +42,13 @@ public class SimpleCrashedDeskConsumer extends AbstractInteractiveShutdownConsum
 
         lastHeartbeat.forEach(
             (recordKey, recordHeartbeat) -> {
-              if (Duration.between(recordHeartbeat, currentTimestamp).toSeconds() >= 12) {
+              if (Duration.between(recordHeartbeat, currentTimestamp).toSeconds() == 12) {
                 System.out.printf("Machine with key %s has crashed!%n", recordKey);
                 crashedMachines.add(recordKey);
               }
             });
-        System.out.printf("%s machines crashed so far %n", crashedMachines.size());
       }
+      System.out.printf("%s machines crashed in total %n", crashedMachines.size());
     }
   }
 
