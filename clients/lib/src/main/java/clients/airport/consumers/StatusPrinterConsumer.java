@@ -26,7 +26,13 @@ public class StatusPrinterConsumer extends AbstractInteractiveShutdownConsumer {
 		props.put("group.id", "status-printers");
 		props.put("enable.auto.commit", "true");
 
-		try (KafkaConsumer<Integer, TerminalInfo> consumer = new KafkaConsumer<>(props, new IntegerDeserializer(), new TerminalInfoDeserializer())) {
+		try (KafkaConsumer<Integer, TerminalInfo> consumer =
+					 new KafkaConsumer<>(
+							 props,
+							 new IntegerDeserializer(),
+							 new TerminalInfoDeserializer()
+					 )
+		) {
 			consumer.subscribe(Collections.singleton(AirportProducer.TOPIC_STATUS));
 
 			while (!done) {

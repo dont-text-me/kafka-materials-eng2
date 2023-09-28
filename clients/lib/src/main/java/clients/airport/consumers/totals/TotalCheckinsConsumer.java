@@ -1,9 +1,17 @@
 package clients.airport.consumers.totals;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.Properties;
 
+import clients.airport.AirportProducer;
 import clients.airport.consumers.AbstractInteractiveShutdownConsumer;
 import clients.messages.MessageProducer;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.IntegerDeserializer;
 
 /**
  * Consumer that reports total numbers of started, completed, and cancelled
@@ -21,7 +29,42 @@ public class TotalCheckinsConsumer extends AbstractInteractiveShutdownConsumer {
 		
 		int started = 0, completed = 0, cancelled = 0;
 
-		// TODO: exercise
+		try (KafkaConsumer<Integer, AirportProducer.TerminalInfo> consumer = new KafkaConsumer<>(props, new IntegerDeserializer(), new AirportProducer.TerminalInfoDeserializer())) {
+			consumer.subscribe(List.of(
+					AirportProducer.TOPIC_COMPLETED,
+					AirportProducer.TOPIC_CANCELLED,
+					AirportProducer.TOPIC_CHECKIN
+			));
+
+			var lastUpdateTime = Instant.now();
+
+			while (!done) {
+				ConsumerRecords<Integer, AirportProducer.TerminalInfo> records = consumer.poll(Duration.ofSeconds(1));
+				for (ConsumerRecord<Integer, AirportProducer.TerminalInfo> record : records) {
+					switch (record.topic()){
+						case AirportProducer.TOPIC_CHECKIN:
+							started++;
+							break;
+						case AirportProducer.TOPIC_COMPLETED:
+							completed++;
+							break;
+						case AirportProducer.TOPIC_CANCELLED:
+							cancelled++;
+							break;
+					}
+					var recordTimeStamp = Instant.ofEpochMilli(record.timestamp());
+					if (Duration.between(lastUpdateTime, recordTimeStamp).toSeconds() == 5){
+						System.out.printf(
+								"Timestamp: %s, stats: started: %d, Completed: %d, Cancelled: %d%n",
+								lastUpdateTime,
+								started,
+								completed,
+								cancelled);
+						lastUpdateTime = recordTimeStamp;
+					}
+				}
+			}
+		}
 
 	}
 
