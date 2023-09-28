@@ -1,6 +1,7 @@
 plugins {
     // Apply the java-library plugin for API and implementation separation.
     id 'java-library'
+    id 'com.diffplug.spotless' version '6.21.0'
 }
 
 repositories {
@@ -22,6 +23,14 @@ dependencies {
 
     // Needed to avoid unwanted errors from missing a SLF4J binding
     implementation 'org.slf4j:slf4j-simple:1.7.36'
+}
+
+spotless{
+    java{
+        importOrder()
+        removeUnusedImports()
+        googleJavaFormat()
+    }
 }
 
 tasks.named('test') {
