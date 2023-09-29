@@ -1,11 +1,15 @@
 package clients.airport.consumers.windows;
 
+import clients.airport.AirportProducer;
 import clients.airport.consumers.AbstractInteractiveShutdownConsumer;
 import clients.messages.MessageProducer;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
+import java.time.Instant;
+import java.util.*;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.IntegerDeserializer;
 
 /**
  * Computes windowed checkin counts over each general area of the airport (defined as the hundreds
@@ -18,6 +22,10 @@ public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownCon
 
   private Duration windowSize = Duration.ofSeconds(30);
 
+  private Integer getArea(Integer recordKey) {
+    return Integer.parseInt(recordKey.toString().substring(0, 1));
+  }
+
   public void run() {
     Properties props = new Properties();
     props.put("bootstrap.servers", MessageProducer.BOOTSTRAP_SERVERS);
@@ -26,7 +34,32 @@ public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownCon
 
     Map<Integer, TimestampSlidingWindow> windowCheckinsByArea = new HashMap<>();
 
-    // TODO: exercise (check the TimestampSlidingWindow tests for examples of how to use it)
+    try (KafkaConsumer<Integer, AirportProducer.TerminalInfo> consumer =
+        new KafkaConsumer<>(
+            props, new IntegerDeserializer(), new AirportProducer.TerminalInfoDeserializer())) {
+      consumer.subscribe(Collections.singleton(AirportProducer.TOPIC_CHECKIN));
+
+      while (!done) {
+        ConsumerRecords<Integer, AirportProducer.TerminalInfo> records =
+            consumer.poll(Duration.ofSeconds(1));
+        for (ConsumerRecord<Integer, AirportProducer.TerminalInfo> record : records) {
+          if (windowCheckinsByArea.containsKey(getArea(record.key()))) {
+            windowCheckinsByArea
+                .get(getArea(record.key()))
+                .add(Instant.ofEpochMilli(record.timestamp()));
+          } else {
+            windowCheckinsByArea.put(getArea(record.key()), new TimestampSlidingWindow());
+          }
+        }
+
+        windowCheckinsByArea.forEach(
+            (area, window) -> {
+              Integer count = window.windowCount(Instant.now().minus(windowSize), Instant.now());
+              System.out.printf(
+                  "%s checkins in area %s in the last %s seconds%n", count, area, windowSize);
+            });
+      }
+    }
   }
 
   public static void main(String[] args) {
