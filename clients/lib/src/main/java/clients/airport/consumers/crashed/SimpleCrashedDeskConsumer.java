@@ -36,6 +36,7 @@ public class SimpleCrashedDeskConsumer extends AbstractInteractiveShutdownConsum
         for (ConsumerRecord<Integer, AirportProducer.TerminalInfo> record : records) {
           // update last timestamps
           lastHeartbeat.put(record.key(), Instant.ofEpochMilli(record.timestamp()));
+          crashedMachines.remove(record.key());
         }
 
         var currentTimestamp = Instant.now();
