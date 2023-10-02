@@ -3,6 +3,9 @@ package clients.airport.consumers.windows;
 import clients.airport.AirportProducer;
 import clients.airport.consumers.AbstractInteractiveShutdownConsumer;
 import clients.messages.MessageProducer;
+import com.github.sh0nk.matplotlib4j.Plot;
+import com.github.sh0nk.matplotlib4j.PythonExecutionException;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
@@ -21,6 +24,7 @@ import org.apache.kafka.common.serialization.IntegerDeserializer;
 public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownConsumer {
 
   private Duration windowSize = Duration.ofSeconds(30);
+  private static final Map<Integer, List<Integer>> checkinHistoryByArea = new HashMap<>();
 
   private Integer getArea(Integer recordKey) {
     return Integer.parseInt(recordKey.toString().substring(0, 1));
@@ -55,6 +59,11 @@ public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownCon
         windowCheckinsByArea.forEach(
             (area, window) -> {
               Integer count = window.windowCount(Instant.now().minus(windowSize), Instant.now());
+              if (checkinHistoryByArea.containsKey(area)) {
+                checkinHistoryByArea.get(area).add(count);
+              } else {
+                checkinHistoryByArea.put(area, new ArrayList<>(List.of(count)));
+              }
               System.out.printf(
                   "%s checkins in area %s in the last %s seconds%n", count, area, windowSize);
             });
@@ -64,5 +73,14 @@ public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownCon
 
   public static void main(String[] args) {
     new WindowedAreaCheckinsConsumer().runUntilEnterIsPressed(System.in);
+    Plot plt = Plot.create();
+    checkinHistoryByArea.forEach(
+        (area, history) -> plt.plot().add(history).label("Area " + area.toString()));
+    try {
+      plt.legend();
+      plt.show();
+    } catch (IOException | PythonExecutionException e) {
+      throw new RuntimeException(e);
+    }
   }
 }
