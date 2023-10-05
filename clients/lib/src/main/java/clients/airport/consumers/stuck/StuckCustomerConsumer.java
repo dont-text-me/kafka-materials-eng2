@@ -4,10 +4,7 @@ import clients.airport.AirportProducer;
 import clients.airport.consumers.AbstractInteractiveShutdownConsumer;
 import clients.messages.MessageProducer;
 import java.time.Duration;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -34,7 +31,7 @@ public class StuckCustomerConsumer extends AbstractInteractiveShutdownConsumer {
     Properties producerProps = new Properties();
     props.put("bootstrap.servers", MessageProducer.BOOTSTRAP_SERVERS);
 
-    Set<Integer> startedCheckins = new HashSet<>();
+    Map<Integer, Integer> startedCheckinsCounter = new HashMap<>();
 
     try (KafkaConsumer<Integer, AirportProducer.TerminalInfo> consumer =
             new KafkaConsumer<>(
@@ -54,18 +51,16 @@ public class StuckCustomerConsumer extends AbstractInteractiveShutdownConsumer {
         for (ConsumerRecord<Integer, AirportProducer.TerminalInfo> record : records) {
           switch (record.topic()) {
             case AirportProducer.TOPIC_CHECKIN:
-              startedCheckins.add(record.key());
+              startedCheckinsCounter.merge(record.key(), 1, Integer::sum);
               break;
             case AirportProducer.TOPIC_COMPLETED:
             case AirportProducer.TOPIC_CANCELLED:
-              startedCheckins.remove(record.key());
+              startedCheckinsCounter.merge(record.key(), -1, Integer::sum);
               break;
             case AirportProducer.TOPIC_OUTOFORDER:
-              if (startedCheckins.contains(record.key())) {
+              if (startedCheckinsCounter.get(record.key()) > 0) {
                 System.out.printf("Machine with key %s is stuck!%n", record.key());
                 producer.send(new ProducerRecord<>(TOPIC_STUCK_CUSTOMERS, record.key(), "stuck"));
-                startedCheckins.remove(
-                    record.key()); // machine can get "fixed" and go out of order again
               }
               break;
           }
