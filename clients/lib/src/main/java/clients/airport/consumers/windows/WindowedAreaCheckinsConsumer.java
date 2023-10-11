@@ -1,17 +1,18 @@
 package clients.airport.consumers.windows;
 
+import static clients.airport.Utils.getTerminalArea;
+
 import clients.airport.AirportProducer;
 import clients.airport.consumers.AbstractInteractiveShutdownConsumer;
 import clients.messages.MessageProducer;
-import com.github.sh0nk.matplotlib4j.Plot;
-import com.github.sh0nk.matplotlib4j.PythonExecutionException;
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
 
 /**
@@ -20,15 +21,13 @@ import org.apache.kafka.common.serialization.IntegerDeserializer;
  *
  * <p>The first version compute counts correctly if we use more than one consumer in the group, and
  * it will forget events if we rebalance. We will fix these issues later on.
+ *
+ * <p>After implementing practical 3, the above issue is solved. However, it requires the use of
+ * {@link clients.airport.AreaPartitioner} to work correctly.
  */
 public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownConsumer {
 
   private Duration windowSize = Duration.ofSeconds(30);
-  private static final Map<Integer, List<Integer>> checkinHistoryByArea = new HashMap<>();
-
-  private Integer getArea(Integer recordKey) {
-    return Integer.parseInt(recordKey.toString().substring(0, 1));
-  }
 
   public void run() {
     Properties props = new Properties();
@@ -41,29 +40,46 @@ public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownCon
     try (KafkaConsumer<Integer, AirportProducer.TerminalInfo> consumer =
         new KafkaConsumer<>(
             props, new IntegerDeserializer(), new AirportProducer.TerminalInfoDeserializer())) {
-      consumer.subscribe(Collections.singleton(AirportProducer.TOPIC_CHECKIN));
+      ConsumerRebalanceListener listener =
+          new ConsumerRebalanceListener() {
+            @Override
+            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+              System.out.println(
+                  "Lost partitions" + partitions.stream().map(TopicPartition::partition).toList());
+              partitions.forEach(
+                  partition ->
+                      windowCheckinsByArea.remove(
+                          partition.partition())); // Note: assumes that partition id = area id (see
+              // AreaPartitioner)
+            }
+
+            @Override
+            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+              System.out.println(
+                  "Gained partitions"
+                      + partitions.stream().map(TopicPartition::partition).toList());
+              consumer.seekToBeginning(partitions);
+            }
+          };
+
+      consumer.subscribe(Collections.singleton(AirportProducer.TOPIC_CHECKIN), listener);
 
       while (!done) {
         ConsumerRecords<Integer, AirportProducer.TerminalInfo> records =
             consumer.poll(Duration.ofSeconds(1));
         for (ConsumerRecord<Integer, AirportProducer.TerminalInfo> record : records) {
-          if (windowCheckinsByArea.containsKey(getArea(record.key()))) {
+          if (windowCheckinsByArea.containsKey(getTerminalArea(record.key()))) {
             windowCheckinsByArea
-                .get(getArea(record.key()))
+                .get(getTerminalArea(record.key()))
                 .add(Instant.ofEpochMilli(record.timestamp()));
           } else {
-            windowCheckinsByArea.put(getArea(record.key()), new TimestampSlidingWindow());
+            windowCheckinsByArea.put(getTerminalArea(record.key()), new TimestampSlidingWindow());
           }
         }
 
         windowCheckinsByArea.forEach(
             (area, window) -> {
               Integer count = window.windowCount(Instant.now().minus(windowSize), Instant.now());
-              if (checkinHistoryByArea.containsKey(area)) {
-                checkinHistoryByArea.get(area).add(count);
-              } else {
-                checkinHistoryByArea.put(area, new ArrayList<>(List.of(count)));
-              }
               System.out.printf(
                   "%s checkins in area %s in the last %s seconds%n", count, area, windowSize);
             });
@@ -73,14 +89,5 @@ public class WindowedAreaCheckinsConsumer extends AbstractInteractiveShutdownCon
 
   public static void main(String[] args) {
     new WindowedAreaCheckinsConsumer().runUntilEnterIsPressed(System.in);
-    Plot plt = Plot.create();
-    checkinHistoryByArea.forEach(
-        (area, history) -> plt.plot().add(history).label("Area " + area.toString()));
-    try {
-      plt.legend();
-      plt.show();
-    } catch (IOException | PythonExecutionException e) {
-      throw new RuntimeException(e);
-    }
   }
 }
