@@ -1,8 +1,9 @@
-package clients.airport.consumers.totals;
+package clients.airport.consumers.stuck;
 
 import clients.airport.AirportProducer;
-import clients.airport.consumers.totals.processors.DateAndTopic;
-import clients.airport.consumers.totals.processors.TimestampProcessor;
+import clients.airport.consumers.stuck.processors.DeskStatus;
+import clients.airport.consumers.stuck.processors.StuckCustomerProcessor;
+import clients.airport.consumers.stuck.processors.TimestampWithStatus;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -18,35 +19,44 @@ import org.apache.kafka.streams.kstream.Grouped;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Printed;
 
-public class StreamsTotalCheckinsConsumer {
-  public static final String TOPIC_CHECKINS_BY_DAY = "selfservice-checkins-by-day";
+public class StreamStuckCustomerConsumer {
+  public static final String TOPIC_DESK_STUCK = "selfservice-stuck";
 
   public KafkaStreams run() {
     StreamsBuilder builder = new StreamsBuilder();
-
+    // TODO: have another look later
     Serde<AirportProducer.TerminalInfo> serde = new AirportProducer.TerminalInfoSerde();
-    KStream<DateAndTopic, Long> countStream =
+    KStream<Integer, TimestampWithStatus> stream =
         builder.stream(
                 List.of(
                     AirportProducer.TOPIC_COMPLETED,
                     AirportProducer.TOPIC_CANCELLED,
-                    AirportProducer.TOPIC_CHECKIN),
+                    AirportProducer.TOPIC_CHECKIN,
+                    AirportProducer.TOPIC_OUTOFORDER),
                 Consumed.with(Serdes.Integer(), serde))
-            .processValues(TimestampProcessor<Integer, AirportProducer.TerminalInfo>::new)
-            .groupBy(
-                (k, v) -> v,
-                Grouped.with(
-                    new DateAndTopic.DateAndTopicSerde(), new DateAndTopic.DateAndTopicSerde()))
-            .count()
-            .toStream();
+            .processValues(StuckCustomerProcessor::new)
+            .groupByKey(
+                Grouped.with(Serdes.Integer(), new TimestampWithStatus.TimestampWithStatusSerde()))
+            .reduce(
+                (acc, current) -> {
+                  TimestampWithStatus older = TimestampWithStatus.min(acc, current);
+                  TimestampWithStatus newer = TimestampWithStatus.max(acc, current);
+                  if (older.status().equals(DeskStatus.STARTED)
+                      && newer.status().equals(DeskStatus.OUT_OF_ORDER)) {
+                    return new TimestampWithStatus(newer.timestamp(), DeskStatus.STUCK);
+                  } else {
+                    return newer;
+                  }
+                })
+            .toStream()
+            .filter((key, value) -> value.status().equals(DeskStatus.STUCK));
 
-    countStream.to(TOPIC_CHECKINS_BY_DAY);
-
-    countStream.print(Printed.toSysOut());
+    stream.to(TOPIC_DESK_STUCK);
+    stream.print(Printed.toSysOut());
 
     Properties props = new Properties();
     props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, AirportProducer.BOOTSTRAP_SERVERS);
-    props.put(StreamsConfig.APPLICATION_ID_CONFIG, "streams-status");
+    props.put(StreamsConfig.APPLICATION_ID_CONFIG, "streams-stuck");
 
     KafkaStreams kStreams = new KafkaStreams(builder.build(), props);
     Runtime.getRuntime().addShutdownHook(new Thread(kStreams::close));
@@ -56,7 +66,7 @@ public class StreamsTotalCheckinsConsumer {
   }
 
   public static void main(String[] args) {
-    KafkaStreams kStreams = new StreamsTotalCheckinsConsumer().run();
+    KafkaStreams kStreams = new StreamStuckCustomerConsumer().run();
 
     // Shut down the application after pressing Enter in the Console
     try (BufferedReader br = new BufferedReader(new InputStreamReader(System.in))) {
