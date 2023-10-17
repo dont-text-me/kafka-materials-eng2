@@ -7,6 +7,9 @@ import clients.airport.consumers.stuck.processors.TimestampWithStatus;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Properties;
 import org.apache.kafka.common.serialization.Serde;
@@ -14,19 +17,15 @@ import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.kstream.Consumed;
-import org.apache.kafka.streams.kstream.Grouped;
-import org.apache.kafka.streams.kstream.KStream;
-import org.apache.kafka.streams.kstream.Printed;
+import org.apache.kafka.streams.kstream.*;
 
 public class StreamStuckCustomerConsumer {
   public static final String TOPIC_DESK_STUCK = "selfservice-stuck";
 
   public KafkaStreams run() {
     StreamsBuilder builder = new StreamsBuilder();
-    // TODO: have another look later
     Serde<AirportProducer.TerminalInfo> serde = new AirportProducer.TerminalInfoSerde();
-    KStream<Integer, TimestampWithStatus> stream =
+    KStream<Integer, String> stream =
         builder.stream(
                 List.of(
                     AirportProducer.TOPIC_COMPLETED,
@@ -49,9 +48,17 @@ public class StreamStuckCustomerConsumer {
                   }
                 })
             .toStream()
-            .filter((key, value) -> value.status().equals(DeskStatus.STUCK));
+            .filter((key, value) -> value.status().equals(DeskStatus.STUCK))
+            .mapValues(
+                (key, value) ->
+                    "Desk %s has been reported as stuck at %s%n"
+                        .formatted(
+                            key,
+                            Instant.ofEpochMilli(value.timestamp())
+                                .atZone(ZoneOffset.UTC)
+                                .format(DateTimeFormatter.ISO_DATE_TIME)));
 
-    stream.to(TOPIC_DESK_STUCK);
+    stream.to(TOPIC_DESK_STUCK, Produced.with(Serdes.Integer(), Serdes.String()));
     stream.print(Printed.toSysOut());
 
     Properties props = new Properties();
