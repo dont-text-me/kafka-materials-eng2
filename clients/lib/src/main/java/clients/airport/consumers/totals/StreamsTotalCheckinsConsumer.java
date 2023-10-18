@@ -1,6 +1,7 @@
 package clients.airport.consumers.totals;
 
 import clients.airport.AirportProducer;
+import clients.airport.Utils;
 import clients.airport.consumers.totals.processors.DateAndTopic;
 import clients.airport.consumers.totals.processors.TimestampProcessor;
 import java.io.BufferedReader;
@@ -25,6 +26,7 @@ public class StreamsTotalCheckinsConsumer {
     StreamsBuilder builder = new StreamsBuilder();
 
     Serde<AirportProducer.TerminalInfo> serde = new AirportProducer.TerminalInfoSerde();
+    Utils.GsonSerde<DateAndTopic> processedSerde = new Utils.GsonSerde<>(DateAndTopic.class);
     KStream<DateAndTopic, Long> countStream =
         builder.stream(
                 List.of(
@@ -33,10 +35,7 @@ public class StreamsTotalCheckinsConsumer {
                     AirportProducer.TOPIC_CHECKIN),
                 Consumed.with(Serdes.Integer(), serde))
             .processValues(TimestampProcessor<Integer, AirportProducer.TerminalInfo>::new)
-            .groupBy(
-                (k, v) -> v,
-                Grouped.with(
-                    new DateAndTopic.DateAndTopicSerde(), new DateAndTopic.DateAndTopicSerde()))
+            .groupBy((k, v) -> v, Grouped.with(processedSerde, processedSerde))
             .count()
             .toStream();
 

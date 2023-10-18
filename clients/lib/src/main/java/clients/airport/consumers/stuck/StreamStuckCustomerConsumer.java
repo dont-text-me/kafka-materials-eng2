@@ -1,6 +1,7 @@
 package clients.airport.consumers.stuck;
 
 import clients.airport.AirportProducer;
+import clients.airport.Utils;
 import clients.airport.consumers.stuck.processors.DeskStatus;
 import clients.airport.consumers.stuck.processors.StuckCustomerProcessor;
 import clients.airport.consumers.stuck.processors.TimestampWithStatus;
@@ -35,7 +36,7 @@ public class StreamStuckCustomerConsumer {
                 Consumed.with(Serdes.Integer(), serde))
             .processValues(StuckCustomerProcessor::new)
             .groupByKey(
-                Grouped.with(Serdes.Integer(), new TimestampWithStatus.TimestampWithStatusSerde()))
+                Grouped.with(Serdes.Integer(), new Utils.GsonSerde<>(TimestampWithStatus.class)))
             .reduce(
                 (acc, current) -> {
                   TimestampWithStatus older = TimestampWithStatus.min(acc, current);
